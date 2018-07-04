@@ -115,4 +115,4 @@ def save_scores(temp_metrics, metric, colnames):
     temp_metrics.columns = colnames
     temp_metrics.to_csv('/Users/sweiss/src/hete_net/hete_dgp/metric_results/'+metric+'.csv')
 
-[save_scores(pd.DataFrame([x[3] for x in scores]), metrics[x], colnames) for x in range(4)]
+[save_scores(pd.DataFrame([q[x] for q in scores]), metrics[x], colnames) for x in range(4)]
