@@ -1,0 +1,126 @@
+---
+title: "Optimize for Expected Profit in Lift Models"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+*hete is the wild west of analytics.
+no wrong answers yet* - Bill Lattner
+
+
+## Intro
+
+Generally lift models use a Qini coefficient to measure the performance of a model. However this metric is generally an indirect measure of what the user wants to achieve: profit. In this post I'll discuss a measure of profitability  in lift models. A neural network can optimize this cost function directly. A comparison between this method compared with a causal tree implementation shows promising results. 
+
+
+## Current lift models
+The goal of lift modeling  (or Heterogeneous Treatment Effects ) is to assign an optimal action for a particular observation. This can be, among other things, targeted advertisement or price discrimination. There are several different formulations of lift models which include flip, causal trees, etc. 
+
+Essentially all try to estimate the interaction between covariates and the treatment. The most simple parameterized model is: 
+$y$: response
+
+$x$: covariates
+
+$t$: randomly assigned treatment variable. Assumed to be binary here. 
+
+$y = \beta_{1}x + \beta_{2}t+ \beta_{3}t*x$ 
+
+Here the treatment effect for a particular observation is $\beta_{2+} \beta_{3}x$. The key point here is that the treatment effect is now a function of $x$ which means we can see which observations are more or less effected than others.
+
+Alternatively one can estimate a machine learning model $y = f(t,x)$ and the treatment effect can be calculated $\hat{f}(t=1,x) - \hat{f}(t=0,x)$. 
+
+However there are a few issues estimating this accurately which has spun several methods to accurately estimate it. 
+
+
+1) The heterogeneous treatment effect is probably very small. Indeed one may find that the treatment effect relative to main effect is so small it does not get split on in normal random forests / GBTs! This means we need a model to focus particularly on the treatment effect if we want the results to be useful.
+
+
+2) We can have potentially hundreds of covariates available to include interactions with. We have no idea a priori which covariates are important so usually we have to expand parameter space significantly. Also, we don't necessarily have the functional form available so we may take into account nonlinear transformations to the data. 
+
+
+3) We can't compare the fitted treatment effect values to the 'truth'. This is the biggest difference between lift models and normal prediction. In prediction settings we can set aside a test set and evaluate our predictions on known responses. Here we want to know the counterfactual; what would have happened if we gave an observation a different value, which lead us to the [fundamental problem of causality](https://en.wikipedia.org/wiki/Rubin_causal_model#The_fundamental_problem_of_causal_inference).
+
+So to sum up; we're trying to estimate a very noisy signal, distributed among a large number of covariates, and we can't check our estimated model directly.  
+
+## Metrics to use
+Ok 3) might be a bit of a stretch because there are metrics people can use to assess the performance of their model. One is qini coefficient. 
+
+This is a measure that observations with similar treatment effects and groups them into the treatment they were given. If these groups are very different then that is a good measure the model is. 
+
+One particular drawback among qini coefficient is that it focuses only on the rank ordering of predicted values. This can be an adequate measure when you care about ranking but there are limitations. The most important being that it does not assign an obvious cutoff between those affected and those not. In the next section I will describe the problem in terms of cost / benefit and suggest a different metric.
+
+##A new kind of metric
+
+
+Suppose we have $1...K$ options in the treatment and the goal is to assign the most profitable treatment for each observation. We have a model a assign an optimal treatment $optim$. The expected profit is: 
+
+$\sum_{k=1}^{K}{I(optim_{i,k})*y_{i}(x,t=optim_{i,k})}$
+
+The problem is that we cannot assign and observe a treatment to our training data. Instead we can only look at the values we have. Instead I will 'simulate' an experiment the following way:
+
+$ExpectedGain =  \frac{\sum_{i=k}^{n}{I(optim_{i} = t_{i})*y_{i}}}{\sum_{i=k}^{n}{I(optim_{i} = t_{i})}}$
+
+Basically this is saying if the optimal results equal the randomly assigned treatment then we include those in our hypothetical model. Since I am assuming the treatment is randomly assigned I think this would give a good indicator on the average increase for each observations under this new models decisions. In order to test this out I compared the expected gain with the actual gain of a simulated dataset. Below is the scatterplot and it appears to be a pretty good metric for the actual results.  
+
+```{r,echo = FALSE}
+library(knitr)
+library(ggplot2)
+true_profits_results = read.csv('/Users/sweiss/src/hete_net/hete_dgp/metric_results/true_profits.csv')[,-1]
+expected_profits_results = read.csv('/Users/sweiss/src/hete_net/hete_dgp/metric_results/expected_profits.csv')[,-1] *3000
+
+
+df_1 = (data.frame(true =t( true_profits_results[2,]), expected = t(expected_profits_results[2,])))
+library(reshape)
+ggplot(df_1, aes(x = df_1[,2], y = df_1[,1])) + geom_point() + xlab('Expected Profits') + 
+  ylab('True Profits') + ggtitle("Expected vs True Profits")
+
+```
+
+##Model this Metric Directly?
+
+This got me thinking... If we have a measure that can accurately measure what we want, can we use it as a loss function? This should lead to a better model since the model will optimize over the metric of interest.
+
+We cannot optimize this directly b/c the indicator function is non-differentiable. Instead I replace the I() function with a probability and use the custom loss function below. - Thanks to [Matt Becker](https://github.com/beckermr) for this insight. 
+
+$loss_{i} =  \sum_{k=1}^{K}{\hat{p_{i,k}(x)}*I(t_i=k)*y_{i}}$
+
+
+
+Using Keras I [hacked together a prototype](https://github.com/samcarlos/hete_post/blob/master/hete_optim.py#L40). 
+
+
+##Experiment
+
+
+To test this new model (I'm calling it hete-optim) I simulated a similar dataset to that found in [this paper](https://arxiv.org/pdf/1707.00102.pdf). There are 200 variables with 15,000 training set and 3,000 test set. Of these there are 8 different scenarios using several nonlinear functions from the explanatory variables. One major difference is that I binarized the response. In addition I increased the random noise and decreased the relative treatment effect to get a more 'realistic' 
+
+
+I'm comparing this model which my former colleague, Bill Lattner, Developed [hete](https://github.com/wlattner/hete) and to [grf](https://cran.r-project.org/web/packages/grf/index.html) 
+
+#Results
+The Metric I'm comparing is profits with true model /  profits with fitted model. So if a model get's a score of .75 then that means that it captures 75% of potential gain using a lift model. This is sort of a normalized regret score so we aggregate results among the 8 scenarios. Below is a boxplot of scores by model type. 
+
+```{r,echo = FALSE}
+library(knitr)
+library(ggplot2)
+true_profits_results = read.csv('/Users/sweiss/src/hete_net/hete_dgp/metric_results/true_profits.csv')[,-1]
+expected_profits_results = read.csv('/Users/sweiss/src/hete_net/hete_dgp/metric_results/expected_profits.csv')[,-1] *3000
+
+library(reshape)
+ggplot(melt(true_profits_results[,2:4]/true_profits_results[,5]), aes(x = variable, y = value)) + geom_boxplot() + xlab('Model Type') + 
+  ylab('Optimum Profits / Model Decision Profit') + ggtitle("Performance relative to best for each model")
+
+```
+
+This method performs best on 7 out of 8 datasets. On average hete_opim gets ~99.8% of the gains while hete gets ~98.9% and grf is 99.5%. This suggests that this method might be on to something.  
+
+#Conclusion
+
+THis post described a method to simulate profits in a real world lift model and the optimize it direclty. It shows promising results to existing techniques. 
+
+[Code](https://github.com/samcarlos/hete_post)

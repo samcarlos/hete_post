@@ -75,7 +75,12 @@ def gridsearch_hete_model(X_train, X_train_control, y_train):
 
             preds = mod.predict([X_train[test_index], X_train_control[test_index]])
 
-            temp_results.append(mean_squared_error(y_train[test_index], preds))
+            optim_value_location = np.where(preds>0)[0]
+            proposed_model = np.where(optim_value_location.reshape(len(optim_value_location),1) == X_train_control[test_index])[0]
+
+            gains = y_train[test_index][proposed_model].mean()
+            print(gains)
+            temp_results.append(gains)
             print(np.mean(temp_results).mean())
 
         results.append(np.mean(temp_results).mean())

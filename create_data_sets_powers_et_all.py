@@ -47,8 +47,15 @@ def create_dataset(n_obs, p_over_2, main_effects, interactions):
     t = np.random.binomial(1, .5 ,n_obs)
     u_x = main_effects(x)
     t_x = interactions(x)
+
+    if u_x.std() > 0:
+        u_x = (u_x - u_x.mean()) /  u_x.std()
+    if t_x.std() > 0:
+        t_x = (t_x - u_x.mean()) /  t_x.std()
+
+    t_x = 0.05* t_x
     y_mean = u_x + (t - .5) * t_x
-    y_mean = np.random.normal( y_mean ,1,n_obs)
+    y_mean = np.random.normal( y_mean ,3 ,n_obs)
     y = 1/(1+np.exp(-y_mean))
     y = np.random.binomial(1, y, n_obs)
     return([y, t, x, t_x, u_x])

@@ -63,7 +63,9 @@ def true_profit(base_counterfactual, estimated_counterfactual, u_x):
     u_x = u_x.reshape(len(u_x),1)
 
     gains = u_x.copy()
-    gains[np.where(estimated_counterfactual > 0)[0]] = gains[np.where(estimated_counterfactual > 0)[0]] + .5*base_counterfactual[np.where(estimated_counterfactual > 0)[0]]
+    #gains[np.where(estimated_counterfactual > 0)[0]] = gains[np.where(estimated_counterfactual > 0)[0]] + .5*base_counterfactual[np.where(estimated_counterfactual > 0)[0]]
+    gains = gains + ((estimated_counterfactual > 0)*1 - .5)*base_counterfactual
+
     gains = sigmoid(gains)
 
     return(np.sum(gains))
@@ -94,8 +96,9 @@ def load_return_score(scenario_number):
     hete_preds = pd.read_csv('/Users/sweiss/src/hete_net/hete_dgp/predicted_data_hete_net/hete_preds_'+str(scenario_number)+'.csv')
     hete_optim = pd.read_csv('/Users/sweiss/src/hete_net/hete_dgp/predicted_data_hete_net/hete_preds_optim_'+str(scenario_number)+'.csv')
     hete_r = pd.read_csv('/Users/sweiss/src/hete_net/hete_dgp/predicted_data_hete_net/hete_R_preds_scenario_'+str(scenario_number)+'_t.csv')
-    preds = [hete_preds.iloc[:,1], np.log(hete_optim.iloc[:,2]/hete_optim.iloc[:,1]), hete_r.iloc[:,1], t_x_test]
-
+    grf_r = pd.read_csv('/Users/sweiss/src/hete_net/hete_dgp/predicted_data_hete_net/grf_R_preds_scenario_'+str(scenario_number)+'_t.csv')
+    all_neg = np.zeros(len(t_test)) - 1
+    preds = [hete_preds.iloc[:,1], np.log(hete_optim.iloc[:,2]/hete_optim.iloc[:,1]), hete_r.iloc[:,1], grf_r.iloc[:,1], t_x_test,all_neg]
 
     pct_accuracy_correct = [np.mean( ((t_x_test).reshape(len(x),1)>0) == (x.reshape(len(x),1)>0)) for x in preds]
     true_profits = [true_profit(t_x_test, x,u_x_test ) for x in preds]
@@ -108,7 +111,7 @@ def load_return_score(scenario_number):
 
 scores = [load_return_score(x) for x in range(8)]
 
-colnames = ['hete_net','hete_optim','hete_R','truth']
+colnames = ['hete_net','hete_optim','hete_R','grf_R','truth', 'allneg']
 metrics = ['q_scores','pct_accuracy_correct','true_profits','expected_profits']
 
 def save_scores(temp_metrics, metric, colnames):
